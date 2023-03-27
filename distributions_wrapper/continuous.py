@@ -6,14 +6,14 @@ from skopt.space import Real, Categorical, Integer
 from sklearn.model_selection import GridSearchCV
 from sklearn.neighbors import KernelDensity
 
-class ContinuousDistribution(tfp.distributions.Distribution):
-    def __init__(self, f=None, samples=None):
+class ContinuousDistribution:
+    def __init__(self, f=None, samples=None, mc_samples=1_000_000):
         if f is None and samples is None:
             raise ValueError('Supply a distribution or samples from a distribution.')
         if samples is not None:
             print("Finding optimal KDE bandwidth for samples using BayesianSearchCV.")
             params = {'bandwidth' : Real(0.01, 100, prior='log-uniform')}
-            grid = BayesSearchCV(KernelDensity(kernel='gaussian'), params1)
+            grid = BayesSearchCV(KernelDensity(kernel='gaussian'), params)
             grid.fit(np.array(samples))
             f = grid.best_estimator_
         if isinstance(f, KernelDensity):
@@ -33,6 +33,7 @@ class ContinuousDistribution(tfp.distributions.Distribution):
             self.sample = lambda n: f.rvs((n, 1))
         else:
             raise TypeError('Distribution not recognized!')
+        self.X = self.sample(mc_samples)
 
     def f(self, X):
         """Probability Density Function"""
@@ -54,16 +55,21 @@ class ContinuousDistribution(tfp.distributions.Distribution):
         x = self.sample(mc_samples)
         return -self.logf(x).mean()
 
-    def kl_div(self, other, from_samples=False, mc_samples=100_000):
+    def kl_div(self, other, from_samples=False, presampled=True, mc_samples=100_000):
+        """KL-Divergence D_KL(self||other)"""
         if from_samples:
             other = ContinuousDistribution(samples=other)
         else:
             other = ContinuousDistribution(f=other)
         print("Calculating KL Divergence by Monte Carlo Integration")
-        x = self.sample(mc_samples)
+        if presampled:
+            x = self.sample(mc_samples)
+        else:
+            x = self.X
         return (self.logf(x) - other.logf(x)).mean()
 
-    def js_div(self, other, from_samples=False, mc_samples=100_000):
+    def js_div(self, other, from_samples=False, presampled=True, mc_samples=100_000):
+        """Jensen-Shannon Divergence JSD(self||other)"""
         if from_samples:
             other = ContinuousDistribution(samples=other)
         else:
@@ -71,7 +77,7 @@ class ContinuousDistribution(tfp.distributions.Distribution):
         print("Calculating JS Divergence by Monte Carlo Integration")
         # We need to draw samples from self and other distributions independently
         # for Monte Carlo Integration to work.
-        x_self = self.sample(mc_samples)
+        x_self = self.X if presampled else self.sample(mc_samples)
         x_other = other.sample(mc_samples)
 
         # Compute log-mixture for self samples
